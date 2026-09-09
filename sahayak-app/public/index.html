@@ -6,6 +6,7 @@
 <title>Sahayak — turn notes into a study session</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
     --paper:#F8F6F1;
@@ -353,6 +354,75 @@
     font-size:0.8rem;
     color:var(--muted);
   }
+
+  /* Usage badge + language selector */
+  .toolbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:18px;
+  }
+  .usage-badge{
+    font-size:0.82rem;
+    color:var(--muted);
+    background:var(--paper-raised);
+    border:1px solid var(--rule-strong);
+    border-radius:20px;
+    padding:5px 12px;
+  }
+  .usage-badge strong{ color:var(--ink); }
+  .lang-select{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:0.85rem;
+    color:var(--ink-soft);
+    border:1px solid var(--rule-strong);
+    border-radius:20px;
+    padding:5px 10px;
+    background:var(--paper-raised);
+    cursor:pointer;
+  }
+
+  /* Paywall modal */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(28,43,74,0.45);
+    display:flex; align-items:center; justify-content:center;
+    z-index:50;
+    padding:20px;
+  }
+  .modal-box{
+    background:var(--paper-raised);
+    border-radius:4px;
+    border-top:4px solid var(--highlight);
+    max-width:380px;
+    width:100%;
+    padding:28px 26px;
+    text-align:center;
+  }
+  .modal-box .big{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    font-size:1.4rem;
+    margin-bottom:10px;
+  }
+  .modal-box p{ color:var(--muted); font-size:0.92rem; line-height:1.5; margin-bottom:20px; }
+  .modal-box button{
+    border:1.5px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    padding:10px 22px;
+    border-radius:3px;
+    font-family:inherit;
+    font-size:0.9rem;
+    cursor:pointer;
+    margin:4px;
+  }
+  .modal-box button.ghost{
+    background:transparent;
+    color:var(--ink);
+  }
 </style>
 </head>
 <body>
@@ -363,6 +433,15 @@
     <div class="tagline">Paste your notes. Get a summary, a quiz, or an answer to what's confusing you.</div>
   </header>
 
+  <div class="toolbar">
+    <span class="usage-badge" id="usageBadge">5 / 5 free actions left today</span>
+    <select class="lang-select" id="langSelect">
+      <option value="English">Answer in: English</option>
+      <option value="Telugu">జవాబు: తెలుగు లో</option>
+      <option value="Hindi">जवाब: हिंदी में</option>
+    </select>
+  </div>
+
   <div class="grid">
     <div>
       <p class="panel-label">Your notes</p>
@@ -370,8 +449,8 @@
         <textarea id="notesInput" placeholder="Paste your class notes, a chapter, or anything you're revising..."></textarea>
       </div>
       <div class="input-row">
-        <button class="file-btn" onclick="document.getElementById('fileInput').click()">Upload a .txt file instead</button>
-        <input type="file" id="fileInput" accept=".txt" style="display:none">
+        <button class="file-btn" onclick="document.getElementById('fileInput').click()">Upload a .txt or .pdf file instead</button>
+        <input type="file" id="fileInput" accept=".txt,.pdf" style="display:none">
         <span class="file-name" id="fileName"></span>
       </div>
       <div class="actions">
@@ -411,10 +490,81 @@ document.getElementById('fileInput').addEventListener('change', function(e){
   const file = e.target.files[0];
   if(!file) return;
   document.getElementById('fileName').textContent = file.name;
-  const reader = new FileReader();
-  reader.onload = function(evt){ notesInput.value = evt.target.result; };
-  reader.readAsText(file);
+
+  if(file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')){
+    document.getElementById('fileName').textContent = file.name + ' (reading PDF...)';
+    const reader = new FileReader();
+    reader.onload = async function(evt){
+      try{
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const pdf = await pdfjsLib.getDocument({ data: evt.target.result }).promise;
+        let fullText = '';
+        for(let i = 1; i <= pdf.numPages; i++){
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          fullText += content.items.map(it => it.str).join(' ') + '\n\n';
+        }
+        notesInput.value = fullText.trim();
+        document.getElementById('fileName').textContent = file.name + ` (${pdf.numPages} pages loaded)`;
+      }catch(err){
+        document.getElementById('fileName').textContent = 'Could not read this PDF — try pasting text instead.';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = function(evt){ notesInput.value = evt.target.result; };
+    reader.readAsText(file);
+  }
 });
+
+/* ---------- Free usage limit / paywall ---------- */
+const DAILY_FREE_LIMIT = 5;
+function getUsage(){
+  const today = new Date().toISOString().slice(0,10);
+  let stored = JSON.parse(localStorage.getItem('sahayak_usage') || '{}');
+  if(stored.date !== today){ stored = { date: today, count: 0 }; }
+  return stored;
+}
+function saveUsage(usage){ localStorage.setItem('sahayak_usage', JSON.stringify(usage)); }
+function refreshUsageBadge(){
+  const usage = getUsage();
+  const left = Math.max(0, DAILY_FREE_LIMIT - usage.count);
+  document.getElementById('usageBadge').innerHTML = `<strong>${left} / ${DAILY_FREE_LIMIT}</strong> free actions left today`;
+}
+function canUseAction(){
+  return getUsage().count < DAILY_FREE_LIMIT;
+}
+function recordAction(){
+  const usage = getUsage();
+  usage.count += 1;
+  saveUsage(usage);
+  refreshUsageBadge();
+}
+function showPaywall(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'paywallOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <div class="big">Today's free actions are done.</div>
+      <p>You've used all ${DAILY_FREE_LIMIT} free summaries/quizzes/doubts for today. Come back tomorrow, or upgrade for unlimited access.</p>
+      <button onclick="closePaywall()">Upgrade (coming soon)</button>
+      <button class="ghost" onclick="closePaywall()">Close</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closePaywall(){
+  const el = document.getElementById('paywallOverlay');
+  if(el) el.remove();
+}
+refreshUsageBadge();
+
+function getLangInstruction(){
+  const val = document.getElementById('langSelect').value;
+  if(val === 'English') return '';
+  return ` Respond entirely in ${val} language (not English), using simple everyday words a student would understand.`;
+}
 
 function setBusy(busy){
   allButtons.forEach(b => b.disabled = busy);
@@ -463,14 +613,16 @@ async function handleSummarize(){
   chatMode = false;
   const notes = getNotes();
   if(!notes){ showEmptyPrompt("Paste something to summarize."); return; }
+  if(!canUseAction()){ showPaywall(); return; }
   outputLabel.textContent = "Summary";
   showLoading();
   setBusy(true);
   try{
-    const system = "You are a study assistant for Indian exam-prep students. Read the notes the student gives you and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"points\":[\"point 1\",\"point 2\", ...]}. Give 5 to 8 concise, exam-relevant key points, each one sentence, in plain simple English.";
+    const system = "You are a study assistant for Indian exam-prep students. Read the notes the student gives you and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"points\":[\"point 1\",\"point 2\", ...]}. Give 5 to 8 concise, exam-relevant key points, each one sentence, in plain simple English." + getLangInstruction();
     const raw = await callClaude(system, notes, 1000);
     const parsed = extractJson(raw);
     renderSummary(parsed.points || []);
+    recordAction();
   }catch(err){ showError(err.message); }
   setBusy(false);
 }
@@ -489,14 +641,16 @@ async function handleQuiz(){
   chatMode = false;
   const notes = getNotes();
   if(!notes){ showEmptyPrompt("Paste something to quiz yourself on."); return; }
+  if(!canUseAction()){ showPaywall(); return; }
   outputLabel.textContent = "Quiz";
   showLoading();
   setBusy(true);
   try{
-    const system = "You are a study assistant for Indian exam-prep students. Read the notes and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"questions\":[{\"question\":\"...\",\"options\":[\"a\",\"b\",\"c\",\"d\"],\"correctIndex\":0,\"explanation\":\"one short sentence\"}]}. Write exactly 5 multiple choice questions testing understanding of the notes, options should be plausible, plain simple English.";
+    const system = "You are a study assistant for Indian exam-prep students. Read the notes and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"questions\":[{\"question\":\"...\",\"options\":[\"a\",\"b\",\"c\",\"d\"],\"correctIndex\":0,\"explanation\":\"one short sentence\"}]}. Write exactly 5 multiple choice questions testing understanding of the notes, options should be plausible, plain simple English." + getLangInstruction();
     const raw = await callClaude(system, notes, 1000);
     const parsed = extractJson(raw);
     renderQuiz(parsed.questions || []);
+    recordAction();
   }catch(err){ showError(err.message); }
   setBusy(false);
 }
@@ -537,8 +691,10 @@ function answerQuiz(qi, oi, correctIndex){
 function handleOpenChat(){
   const notes = getNotes();
   if(!notes){ showEmptyPrompt("Paste your notes so I know what you're asking about."); return; }
+  if(!canUseAction()){ showPaywall(); return; }
   chatMode = true;
   chatHistory = [];
+  recordAction();
   outputLabel.textContent = "Doubts";
   outputEl.innerHTML = `
     <div class="chat-log" id="chatLog"></div>
@@ -560,7 +716,7 @@ async function sendChat(){
   input.disabled = true;
   appendMsg('bot', '...', true);
   try{
-    const system = `You are a patient study assistant helping a student with these notes:\n\n${notes}\n\nAnswer their doubt clearly and briefly, in plain simple English, directly grounded in the notes where possible.`;
+    const system = `You are a patient study assistant helping a student with these notes:\n\n${notes}\n\nAnswer their doubt clearly and briefly, in plain simple English, directly grounded in the notes where possible.${getLangInstruction()}`;
     chatHistory.push({role:"user", content:text});
     const response = await fetch("/api/message", {
       method: "POST",
