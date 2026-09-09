@@ -19,7 +19,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 // Tried in order. Each entry is a real Gemini model id.
 const MODEL_FALLBACK_ORDER = [
   'gemini-3.6-flash',       // primary
-  'gemini-2.5-flash-lite',  // faster, higher rate limits
+  'gemini-3.5-flash-lite',  // faster, higher rate limits
   'gemini-1.5-flash',
   'gemini-1.5-pro',
 ];
