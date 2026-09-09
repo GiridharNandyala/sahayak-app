@@ -586,13 +586,14 @@ function showError(msg){
   outputEl.innerHTML = `<div class="error-box">Something went wrong: ${msg}. Try again in a moment.</div>`;
 }
 
-async function callClaude(system, userText, maxTokens){
+async function callClaude(system, userText, maxTokens, jsonMode){
   const response = await fetch("/api/message", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       max_tokens: maxTokens || 1000,
       system: system,
+      json: !!jsonMode,
       messages: [{ role: "user", content: userText }]
     })
   });
@@ -605,8 +606,27 @@ async function callClaude(system, userText, maxTokens){
 }
 
 function extractJson(raw){
-  let cleaned = raw.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-  return JSON.parse(cleaned);
+  // Strip markdown code fences defensively, even though the server already
+  // asks Gemini for raw JSON and sanitizes it too.
+  let cleaned = raw.replace(/```json|```/g, '').trim();
+  try{
+    return JSON.parse(cleaned);
+  }catch(e){
+    throw new Error("couldn't read the AI's response — try again");
+  }
+}
+
+// Calls callClaude expecting JSON back; if parsing fails once, retries the
+// call a single time before giving up, so a one-off bad response doesn't
+// break the UI.
+async function callClaudeJson(system, userText, maxTokens){
+  try{
+    const raw = await callClaude(system, userText, maxTokens, true);
+    return extractJson(raw);
+  }catch(firstErr){
+    const raw2 = await callClaude(system, userText, maxTokens, true);
+    return extractJson(raw2);
+  }
 }
 
 async function handleSummarize(){
@@ -619,8 +639,7 @@ async function handleSummarize(){
   setBusy(true);
   try{
     const system = "You are a study assistant for Indian exam-prep students. Read the notes the student gives you and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"points\":[\"point 1\",\"point 2\", ...]}. Give 5 to 8 concise, exam-relevant key points, each one sentence, in plain simple English." + getLangInstruction();
-    const raw = await callClaude(system, notes, 1000);
-    const parsed = extractJson(raw);
+    const parsed = await callClaudeJson(system, notes, 1000);
     renderSummary(parsed.points || []);
     recordAction();
   }catch(err){ showError(err.message); }
@@ -647,8 +666,7 @@ async function handleQuiz(){
   setBusy(true);
   try{
     const system = "You are a study assistant for Indian exam-prep students. Read the notes and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"questions\":[{\"question\":\"...\",\"options\":[\"a\",\"b\",\"c\",\"d\"],\"correctIndex\":0,\"explanation\":\"one short sentence\"}]}. Write exactly 5 multiple choice questions testing understanding of the notes, options should be plausible, plain simple English." + getLangInstruction();
-    const raw = await callClaude(system, notes, 1000);
-    const parsed = extractJson(raw);
+    const parsed = await callClaudeJson(system, notes, 1800);
     renderQuiz(parsed.questions || []);
     recordAction();
   }catch(err){ showError(err.message); }
