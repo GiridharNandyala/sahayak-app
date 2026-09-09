@@ -583,7 +583,12 @@ function showLoading(){
 }
 
 function showError(msg){
-  outputEl.innerHTML = `<div class="error-box">Something went wrong: ${msg}. Try again in a moment.</div>`;
+  // If the backend already sent a clean, user-facing sentence (like the
+  // "all models are busy" fallback message), show it as-is. Otherwise wrap
+  // it with friendlier framing.
+  const alreadyFriendly = /^[A-Z].*[.!]$/.test(msg.trim());
+  const html = alreadyFriendly ? msg : `Something went wrong: ${msg}. Try again in a moment.`;
+  outputEl.innerHTML = `<div class="error-box">${html}</div>`;
 }
 
 async function callClaude(system, userText, maxTokens, jsonMode){
