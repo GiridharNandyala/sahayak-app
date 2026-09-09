@@ -10,7 +10,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 if (!GEMINI_API_KEY) {
   console.warn('WARNING: GEMINI_API_KEY is not set. Set it in your host\'s environment variables.');
