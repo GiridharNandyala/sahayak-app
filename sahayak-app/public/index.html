@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sahayak — turn notes into a study session</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F8F6F1;
+    --paper-raised:#FFFFFF;
+    --ink:#1C2B4A;
+    --ink-soft:#3B4A6B;
+    --rule:#DAD3C2;
+    --rule-strong:#C7BEA8;
+    --highlight:#F2B705;
+    --highlight-ink:#4A3900;
+    --correct:#3A7D57;
+    --correct-bg:#E7F2EA;
+    --wrong:#B4483A;
+    --wrong-bg:#FBEAE7;
+    --muted:#746E5E;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  ::selection{ background:var(--highlight); color:var(--highlight-ink); }
+
+  .wrap{
+    max-width:1080px;
+    margin:0 auto;
+    padding:28px 20px 60px;
+  }
+
+  header{
+    border-bottom:2px solid var(--ink);
+    padding-bottom:18px;
+    margin-bottom:28px;
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .brand{
+    font-family:'Fraunces', serif;
+    font-weight:600;
+    font-size:2.1rem;
+    letter-spacing:-0.01em;
+    color:var(--ink);
+  }
+  .brand em{ font-style:italic; color:inherit; font-weight:440; }
+  .tagline{
+    font-size:0.95rem;
+    color:var(--muted);
+    max-width:320px;
+    text-align:right;
+    line-height:1.4;
+  }
+  @media (max-width:640px){
+    .tagline{ text-align:left; max-width:none; }
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:1fr 1.3fr;
+    gap:32px;
+  }
+  @media (max-width:860px){
+    .grid{ grid-template-columns:1fr; }
+  }
+
+  .panel-label{
+    font-family:'Fraunces', serif;
+    font-size:1.05rem;
+    font-weight:600;
+    margin:0 0 10px;
+    color:var(--ink);
+  }
+
+  /* Notebook input */
+  .notebook{
+    background:
+      linear-gradient(var(--paper-raised),var(--paper-raised)) padding-box,
+      repeating-linear-gradient(var(--paper-raised) 0 31px, var(--rule) 31px 32px) content-box;
+    border:1px solid var(--rule-strong);
+    border-left:3px solid var(--highlight);
+    border-radius:2px;
+    padding:14px 16px;
+  }
+  textarea{
+    width:100%;
+    min-height:280px;
+    border:none;
+    outline:none;
+    resize:vertical;
+    background:transparent;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:0.98rem;
+    line-height:32px;
+    color:var(--ink);
+  }
+  textarea::placeholder{ color:#A39C89; }
+
+  .input-row{
+    display:flex;
+    gap:10px;
+    margin-top:14px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  .file-btn{
+    font-size:0.85rem;
+    color:var(--ink-soft);
+    text-decoration:underline;
+    text-underline-offset:3px;
+    cursor:pointer;
+    background:none;
+    border:none;
+    padding:0;
+    font-family:inherit;
+  }
+  .file-name{ font-size:0.82rem; color:var(--muted); }
+
+  .actions{
+    display:flex;
+    gap:10px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+  button.action{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:0.92rem;
+    font-weight:500;
+    padding:10px 16px;
+    border-radius:3px;
+    border:1.5px solid var(--ink);
+    background:var(--paper-raised);
+    color:var(--ink);
+    cursor:pointer;
+    transition:transform .12s ease, background .12s ease;
+  }
+  button.action:hover{ background:var(--ink); color:var(--paper); }
+  button.action:active{ transform:scale(0.97); }
+  button.action.primary{
+    background:var(--ink);
+    color:var(--paper);
+  }
+  button.action.primary:hover{ background:var(--ink-soft); }
+  button.action:disabled{
+    opacity:0.4;
+    cursor:not-allowed;
+    transform:none;
+  }
+  button.action:disabled:hover{ background:var(--paper-raised); color:var(--ink); }
+  button.action.primary:disabled:hover{ background:var(--ink); color:var(--paper); }
+
+  /* Output panel */
+  .output{
+    background:var(--paper-raised);
+    border:1px solid var(--rule-strong);
+    border-radius:2px;
+    padding:20px 22px;
+    min-height:340px;
+  }
+  .empty-state{
+    height:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    justify-content:center;
+    color:var(--muted);
+    font-size:0.95rem;
+    line-height:1.6;
+    min-height:300px;
+  }
+  .empty-state .big{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    font-size:1.3rem;
+    color:var(--ink-soft);
+    margin-bottom:8px;
+  }
+
+  .loading-lines{ padding-top:4px; }
+  .loading-lines div{
+    height:12px;
+    border-radius:2px;
+    background:linear-gradient(90deg, var(--rule) 25%, #EFE9DA 37%, var(--rule) 63%);
+    background-size:400% 100%;
+    animation:shimmer 1.3s ease infinite;
+    margin-bottom:14px;
+  }
+  .loading-lines div:nth-child(1){ width:92%; }
+  .loading-lines div:nth-child(2){ width:78%; }
+  .loading-lines div:nth-child(3){ width:85%; }
+  .loading-lines div:nth-child(4){ width:60%; }
+  @keyframes shimmer{
+    0%{ background-position:100% 0; }
+    100%{ background-position:0 0; }
+  }
+
+  .error-box{
+    border-left:3px solid var(--wrong);
+    background:var(--wrong-bg);
+    color:var(--wrong);
+    padding:12px 14px;
+    font-size:0.9rem;
+    border-radius:2px;
+  }
+
+  /* Summary */
+  .summary-title{
+    font-family:'Fraunces', serif;
+    font-size:1.15rem;
+    margin:0 0 14px;
+    font-weight:600;
+  }
+  .summary-points{ margin:0; padding:0; list-style:none; }
+  .summary-points li{
+    padding:10px 0;
+    border-bottom:1px solid var(--rule);
+    font-size:0.96rem;
+    line-height:1.55;
+    display:flex;
+    gap:10px;
+  }
+  .summary-points li:last-child{ border-bottom:none; }
+  .summary-points .num{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    color:var(--muted);
+    flex-shrink:0;
+  }
+
+  /* Quiz */
+  .quiz-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    margin-bottom:6px;
+  }
+  .quiz-score{
+    font-size:0.85rem;
+    color:var(--muted);
+  }
+  .q-block{
+    padding:16px 0;
+    border-bottom:1px solid var(--rule);
+  }
+  .q-block:last-child{ border-bottom:none; }
+  .q-text{
+    font-size:0.98rem;
+    font-weight:500;
+    margin-bottom:12px;
+  }
+  .q-option{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:9px 10px;
+    border:1px solid var(--rule);
+    border-radius:3px;
+    margin-bottom:8px;
+    cursor:pointer;
+    font-size:0.92rem;
+    line-height:1.4;
+    transition:background .1s ease;
+  }
+  .q-option:hover{ background:#FAF8F2; }
+  .q-option.correct{ border-color:var(--correct); background:var(--correct-bg); color:#215A38; }
+  .q-option.wrong{ border-color:var(--wrong); background:var(--wrong-bg); color:#8A3729; }
+  .q-option.disabled{ cursor:default; }
+  .q-option .letter{
+    font-family:'Fraunces', serif;
+    font-style:italic;
+    color:var(--muted);
+    flex-shrink:0;
+  }
+  .q-explain{
+    font-size:0.86rem;
+    color:var(--muted);
+    margin-top:6px;
+    padding-left:2px;
+    line-height:1.5;
+  }
+
+  /* Chat */
+  .chat-log{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    max-height:420px;
+    overflow-y:auto;
+    padding-right:4px;
+    margin-bottom:14px;
+  }
+  .msg{ max-width:88%; font-size:0.94rem; line-height:1.5; }
+  .msg.user{
+    align-self:flex-end;
+    background:var(--ink);
+    color:var(--paper);
+    padding:9px 13px;
+    border-radius:10px 10px 2px 10px;
+  }
+  .msg.bot{
+    align-self:flex-start;
+    color:var(--ink);
+    padding:2px 0;
+    border-left:2px solid var(--highlight);
+    padding-left:12px;
+  }
+  .chat-input-row{
+    display:flex;
+    gap:8px;
+    border-top:1px solid var(--rule);
+    padding-top:14px;
+  }
+  .chat-input-row input{
+    flex:1;
+    border:1px solid var(--rule-strong);
+    border-radius:3px;
+    padding:10px 12px;
+    font-family:inherit;
+    font-size:0.92rem;
+    outline:none;
+    background:var(--paper);
+  }
+  .chat-input-row input:focus{ border-color:var(--ink-soft); }
+  .chat-input-row button{
+    border:1.5px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    border-radius:3px;
+    padding:0 18px;
+    font-family:inherit;
+    font-size:0.9rem;
+    cursor:pointer;
+  }
+  .chat-input-row button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  footer{
+    margin-top:36px;
+    padding-top:16px;
+    border-top:1px solid var(--rule);
+    font-size:0.8rem;
+    color:var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">Saha<em>yak</em></div>
+    <div class="tagline">Paste your notes. Get a summary, a quiz, or an answer to what's confusing you.</div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <p class="panel-label">Your notes</p>
+      <div class="notebook">
+        <textarea id="notesInput" placeholder="Paste your class notes, a chapter, or anything you're revising..."></textarea>
+      </div>
+      <div class="input-row">
+        <button class="file-btn" onclick="document.getElementById('fileInput').click()">Upload a .txt file instead</button>
+        <input type="file" id="fileInput" accept=".txt" style="display:none">
+        <span class="file-name" id="fileName"></span>
+      </div>
+      <div class="actions">
+        <button class="action primary" id="btnSummarize" onclick="handleSummarize()">Summarize</button>
+        <button class="action" id="btnQuiz" onclick="handleQuiz()">Make a quiz</button>
+        <button class="action" id="btnDoubt" onclick="handleOpenChat()">Ask a doubt</button>
+      </div>
+    </div>
+
+    <div>
+      <p class="panel-label" id="outputLabel">Output</p>
+      <div class="output" id="output">
+        <div class="empty-state">
+          <div class="big">Nothing here yet.</div>
+          <div>Paste your notes on the left, then pick what you need — a quick summary, a self-test quiz, or ask a specific doubt.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Nothing you paste is stored — it only lives in this browser tab.</footer>
+</div>
+
+<script>
+const outputEl = document.getElementById('output');
+const outputLabel = document.getElementById('outputLabel');
+const notesInput = document.getElementById('notesInput');
+const btnSummarize = document.getElementById('btnSummarize');
+const btnQuiz = document.getElementById('btnQuiz');
+const btnDoubt = document.getElementById('btnDoubt');
+const allButtons = [btnSummarize, btnQuiz, btnDoubt];
+
+let chatHistory = []; // {role, content}
+let chatMode = false;
+
+document.getElementById('fileInput').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  document.getElementById('fileName').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = function(evt){ notesInput.value = evt.target.result; };
+  reader.readAsText(file);
+});
+
+function setBusy(busy){
+  allButtons.forEach(b => b.disabled = busy);
+}
+
+function getNotes(){
+  return notesInput.value.trim();
+}
+
+function showEmptyPrompt(msg){
+  outputEl.innerHTML = `<div class="empty-state"><div class="big">Add some notes first.</div><div>${msg}</div></div>`;
+}
+
+function showLoading(){
+  outputEl.innerHTML = `<div class="loading-lines"><div></div><div></div><div></div><div></div></div>`;
+}
+
+function showError(msg){
+  outputEl.innerHTML = `<div class="error-box">Something went wrong: ${msg}. Try again in a moment.</div>`;
+}
+
+async function callClaude(system, userText, maxTokens){
+  const response = await fetch("/api/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      max_tokens: maxTokens || 1000,
+      system: system,
+      messages: [{ role: "user", content: userText }]
+    })
+  });
+  const data = await response.json();
+  if(!response.ok){
+    throw new Error((data && data.error && data.error.message) || "API error");
+  }
+  const textBlock = data.content.find(c => c.type === "text");
+  return textBlock ? textBlock.text : "";
+}
+
+function extractJson(raw){
+  let cleaned = raw.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+  return JSON.parse(cleaned);
+}
+
+async function handleSummarize(){
+  chatMode = false;
+  const notes = getNotes();
+  if(!notes){ showEmptyPrompt("Paste something to summarize."); return; }
+  outputLabel.textContent = "Summary";
+  showLoading();
+  setBusy(true);
+  try{
+    const system = "You are a study assistant for Indian exam-prep students. Read the notes the student gives you and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"points\":[\"point 1\",\"point 2\", ...]}. Give 5 to 8 concise, exam-relevant key points, each one sentence, in plain simple English.";
+    const raw = await callClaude(system, notes, 1000);
+    const parsed = extractJson(raw);
+    renderSummary(parsed.points || []);
+  }catch(err){ showError(err.message); }
+  setBusy(false);
+}
+
+function renderSummary(points){
+  if(!points.length){ showError("couldn't generate a summary"); return; }
+  let html = `<div class="summary-title">Key points</div><ul class="summary-points">`;
+  points.forEach((p,i) => {
+    html += `<li><span class="num">${i+1}.</span><span>${escapeHtml(p)}</span></li>`;
+  });
+  html += `</ul>`;
+  outputEl.innerHTML = html;
+}
+
+async function handleQuiz(){
+  chatMode = false;
+  const notes = getNotes();
+  if(!notes){ showEmptyPrompt("Paste something to quiz yourself on."); return; }
+  outputLabel.textContent = "Quiz";
+  showLoading();
+  setBusy(true);
+  try{
+    const system = "You are a study assistant for Indian exam-prep students. Read the notes and return ONLY valid JSON, no markdown fences, no commentary, in this exact shape: {\"questions\":[{\"question\":\"...\",\"options\":[\"a\",\"b\",\"c\",\"d\"],\"correctIndex\":0,\"explanation\":\"one short sentence\"}]}. Write exactly 5 multiple choice questions testing understanding of the notes, options should be plausible, plain simple English.";
+    const raw = await callClaude(system, notes, 1000);
+    const parsed = extractJson(raw);
+    renderQuiz(parsed.questions || []);
+  }catch(err){ showError(err.message); }
+  setBusy(false);
+}
+
+function renderQuiz(questions){
+  if(!questions.length){ showError("couldn't generate a quiz"); return; }
+  let html = `<div class="quiz-head"><div class="summary-title" style="margin-bottom:0">Test yourself</div><span class="quiz-score" id="scoreLabel">0 / ${questions.length} answered</span></div>`;
+  questions.forEach((q, qi) => {
+    html += `<div class="q-block"><div class="q-text">${qi+1}. ${escapeHtml(q.question)}</div>`;
+    q.options.forEach((opt, oi) => {
+      const letter = String.fromCharCode(97+oi);
+      html += `<div class="q-option" id="q${qi}o${oi}" onclick="answerQuiz(${qi},${oi},${q.correctIndex})"><span class="letter">${letter})</span><span>${escapeHtml(opt)}</span></div>`;
+    });
+    html += `<div class="q-explain" id="q${qi}explain" style="display:none">${escapeHtml(q.explanation||"")}</div></div>`;
+  });
+  outputEl.innerHTML = html;
+  window._answeredCount = 0;
+  window._quizTotal = questions.length;
+}
+
+function answerQuiz(qi, oi, correctIndex){
+  const block = document.querySelectorAll(`[id^="q${qi}o"]`);
+  if(block[0] && block[0].classList.contains('disabled')) return; // already answered
+  block.forEach((el, idx) => {
+    el.classList.add('disabled');
+    el.onclick = null;
+    if(idx === correctIndex) el.classList.add('correct');
+  });
+  if(oi !== correctIndex){
+    document.getElementById(`q${qi}o${oi}`).classList.add('wrong');
+  }
+  document.getElementById(`q${qi}explain`).style.display = 'block';
+  window._answeredCount = (window._answeredCount || 0) + 1;
+  const scoreLabel = document.getElementById('scoreLabel');
+  if(scoreLabel) scoreLabel.textContent = `${window._answeredCount} / ${window._quizTotal} answered`;
+}
+
+function handleOpenChat(){
+  const notes = getNotes();
+  if(!notes){ showEmptyPrompt("Paste your notes so I know what you're asking about."); return; }
+  chatMode = true;
+  chatHistory = [];
+  outputLabel.textContent = "Doubts";
+  outputEl.innerHTML = `
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="What's confusing you?" onkeydown="if(event.key==='Enter') sendChat()">
+      <button onclick="sendChat()" id="chatSendBtn">Ask</button>
+    </div>`;
+  document.getElementById('chatInput').focus();
+}
+
+async function sendChat(){
+  const input = document.getElementById('chatInput');
+  const text = input.value.trim();
+  if(!text) return;
+  const notes = getNotes();
+  input.value = "";
+  appendMsg('user', text);
+  document.getElementById('chatSendBtn').disabled = true;
+  input.disabled = true;
+  appendMsg('bot', '...', true);
+  try{
+    const system = `You are a patient study assistant helping a student with these notes:\n\n${notes}\n\nAnswer their doubt clearly and briefly, in plain simple English, directly grounded in the notes where possible.`;
+    chatHistory.push({role:"user", content:text});
+    const response = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        max_tokens: 1000,
+        system: system,
+        messages: chatHistory
+      })
+    });
+    const data = await response.json();
+    if(!response.ok) throw new Error((data.error && data.error.message) || "API error");
+    const textBlock = data.content.find(c => c.type === "text");
+    const answer = textBlock ? textBlock.text : "Sorry, I couldn't answer that.";
+    chatHistory.push({role:"assistant", content:answer});
+    replaceLastBotMsg(answer);
+  }catch(err){
+    replaceLastBotMsg("Something went wrong: " + err.message);
+  }
+  document.getElementById('chatSendBtn').disabled = false;
+  input.disabled = false;
+  input.focus();
+}
+
+function formatChatText(text){
+  // escape first, then re-introduce **bold** and simple "- " bullet lines
+  let safe = escapeHtml(text);
+  safe = safe.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  safe = safe.replace(/(^|\n)-\s+/g, '$1• ');
+  safe = safe.replace(/\n/g, '<br>');
+  return safe;
+}
+
+function appendMsg(role, text, isPlaceholder){
+  const log = document.getElementById('chatLog');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  if(isPlaceholder) div.id = 'placeholderMsg';
+  div.innerHTML = role === 'bot' ? formatChatText(text) : escapeHtml(text);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function replaceLastBotMsg(text){
+  const ph = document.getElementById('placeholderMsg');
+  if(ph){ ph.innerHTML = formatChatText(text); ph.removeAttribute('id'); }
+}
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
