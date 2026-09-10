@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root{
     --paper:#F8F6F1;
@@ -373,6 +374,12 @@
     padding:5px 12px;
   }
   .usage-badge strong{ color:var(--ink); }
+  .usage-badge.premium{
+    color:var(--highlight-ink);
+    background:#FFF6DA;
+    border-color:var(--highlight);
+    font-weight:500;
+  }
   .lang-select{
     font-family:'IBM Plex Sans', sans-serif;
     font-size:0.85rem;
@@ -423,6 +430,20 @@
     background:transparent;
     color:var(--ink);
   }
+
+  .toast{
+    position:fixed;
+    bottom:24px; left:50%;
+    transform:translateX(-50%);
+    background:var(--ink);
+    color:var(--paper);
+    padding:12px 22px;
+    border-radius:24px;
+    font-size:0.9rem;
+    border-left:4px solid var(--highlight);
+    z-index:60;
+    box-shadow:0 6px 20px rgba(0,0,0,0.15);
+  }
 </style>
 </head>
 <body>
@@ -435,7 +456,7 @@
 
   <div class="toolbar">
     <span class="usage-badge" id="usageBadge">5 / 5 free actions left today</span>
-    <select class="lang-select" id="langSelect">
+    <select class="lang-select" id="langSelect" aria-label="Select Language">
       <option value="English">Answer in: English</option>
       <option value="Telugu">జవాబు: తెలుగు లో</option>
       <option value="Hindi">जवाब: हिंदी में</option>
@@ -450,7 +471,7 @@
       </div>
       <div class="input-row">
         <button class="file-btn" onclick="document.getElementById('fileInput').click()">Upload a .txt or .pdf file instead</button>
-        <input type="file" id="fileInput" accept=".txt,.pdf" style="display:none">
+        <input type="file" id="fileInput" accept=".txt,.pdf" hidden>
         <span class="file-name" id="fileName"></span>
       </div>
       <div class="actions">
@@ -518,8 +539,23 @@ document.getElementById('fileInput').addEventListener('change', function(e){
   }
 });
 
-/* ---------- Free usage limit / paywall ---------- */
+/* ---------- Anonymous user id (ties premium status to this browser) ---------- */
+function getUserId(){
+  let id = localStorage.getItem('sahayak_user_id');
+  if(!id){
+    id = (crypto.randomUUID ? crypto.randomUUID() : 'u-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+    localStorage.setItem('sahayak_user_id', id);
+  }
+  return id;
+}
+function authHeaders(){
+  return { 'Content-Type': 'application/json', 'x-user-id': getUserId() };
+}
+
+/* ---------- Free usage limit / premium / paywall ---------- */
 const DAILY_FREE_LIMIT = 5;
+let isPremium = false;
+
 function getUsage(){
   const today = new Date().toISOString().slice(0,10);
   let stored = JSON.parse(localStorage.getItem('sahayak_usage') || '{}');
@@ -528,29 +564,50 @@ function getUsage(){
 }
 function saveUsage(usage){ localStorage.setItem('sahayak_usage', JSON.stringify(usage)); }
 function refreshUsageBadge(){
+  const badge = document.getElementById('usageBadge');
+  if(isPremium){
+    badge.textContent = '✨ Sahayak Premium — unlimited';
+    badge.classList.add('premium');
+    return;
+  }
+  badge.classList.remove('premium');
   const usage = getUsage();
   const left = Math.max(0, DAILY_FREE_LIMIT - usage.count);
-  document.getElementById('usageBadge').innerHTML = `<strong>${left} / ${DAILY_FREE_LIMIT}</strong> free actions left today`;
+  badge.innerHTML = `<strong>${left} / ${DAILY_FREE_LIMIT}</strong> free actions left today`;
 }
 function canUseAction(){
+  if(isPremium) return true;
   return getUsage().count < DAILY_FREE_LIMIT;
 }
 function recordAction(){
+  if(isPremium) return;
   const usage = getUsage();
   usage.count += 1;
   saveUsage(usage);
   refreshUsageBadge();
 }
+
+async function checkPremiumStatus(){
+  try{
+    const res = await fetch('/api/premium-status', { headers: authHeaders() });
+    const data = await res.json();
+    isPremium = !!data.isPremium;
+  }catch(e){ isPremium = false; }
+  refreshUsageBadge();
+}
+checkPremiumStatus();
+
 function showPaywall(){
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'paywallOverlay';
   overlay.innerHTML = `
     <div class="modal-box">
-      <div class="big">Today's free actions are done.</div>
-      <p>You've used all ${DAILY_FREE_LIMIT} free summaries/quizzes/doubts for today. Come back tomorrow, or upgrade for unlimited access.</p>
-      <button onclick="closePaywall()">Upgrade (coming soon)</button>
-      <button class="ghost" onclick="closePaywall()">Close</button>
+      <div class="big">Daily free limit reached!</div>
+      <p>You've used all ${DAILY_FREE_LIMIT} free summaries/quizzes/doubts for today. Upgrade to Sahayak Premium for ₹49/month for unlimited access.</p>
+      <button onclick="startCheckout()" id="upgradeBtn">Upgrade to Premium — ₹49/month</button>
+      <br>
+      <button class="ghost" onclick="closePaywall()">Maybe later</button>
     </div>`;
   document.body.appendChild(overlay);
 }
@@ -558,7 +615,66 @@ function closePaywall(){
   const el = document.getElementById('paywallOverlay');
   if(el) el.remove();
 }
-refreshUsageBadge();
+
+function showToast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+async function startCheckout(){
+  const btn = document.getElementById('upgradeBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Starting checkout...'; }
+  try{
+    const res = await fetch('/api/create-subscription', { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    if(!res.ok) throw new Error((data.error && data.error.message) || 'Could not start checkout');
+
+    const options = {
+      key: data.keyId,
+      subscription_id: data.subscriptionId,
+      name: 'Sahayak Premium',
+      description: 'Unlimited summaries, quizzes and doubt-solving',
+      theme: { color: '#1C2B4A' },
+      handler: async function(response){
+        try{
+          const verifyRes = await fetch('/api/verify-payment', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_subscription_id: response.razorpay_subscription_id,
+              razorpay_signature: response.razorpay_signature,
+            }),
+          });
+          const verifyData = await verifyRes.json();
+          if(verifyRes.ok && verifyData.success){
+            isPremium = true;
+            refreshUsageBadge();
+            closePaywall();
+            showToast('✨ Premium Activated! Unlimited access unlocked.');
+          } else {
+            showToast('Payment received but verification failed — contact support.');
+          }
+        }catch(e){
+          showToast('Payment done, but we could not confirm it. Please refresh and check.');
+        }
+      },
+      modal: {
+        ondismiss: function(){
+          if(btn){ btn.disabled = false; btn.textContent = 'Upgrade to Premium — ₹49/month'; }
+        }
+      }
+    };
+    const rzp = new Razorpay(options);
+    rzp.open();
+  }catch(err){
+    showToast('Could not start checkout: ' + err.message);
+    if(btn){ btn.disabled = false; btn.textContent = 'Upgrade to Premium — ₹49/month'; }
+  }
+}
 
 function getLangInstruction(){
   const val = document.getElementById('langSelect').value;
@@ -594,7 +710,7 @@ function showError(msg){
 async function callClaude(system, userText, maxTokens, jsonMode){
   const response = await fetch("/api/message", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify({
       max_tokens: maxTokens || 1000,
       system: system,
@@ -743,7 +859,7 @@ async function sendChat(){
     chatHistory.push({role:"user", content:text});
     const response = await fetch("/api/message", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({
         max_tokens: 1000,
         system: system,
